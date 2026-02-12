@@ -2,15 +2,16 @@
 'use client';
 
 import { Clock, Trash2 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, memo } from 'react';
 
 import type { PlayRecord } from '@/lib/db.client';
 import {
-  clearAllPlayRecords,
   getAllPlayRecords,
   subscribeToDataUpdates,
   forceRefreshPlayRecordsCache,
 } from '@/lib/db.client';
+// 🚀 TanStack Query Mutations
+import { useClearPlayRecordsMutation } from '@/hooks/usePlayRecordsMutations';
 import {
   getDetailedWatchingUpdates,
   subscribeToWatchingUpdatesEvent,
@@ -27,7 +28,8 @@ interface ContinueWatchingProps {
   className?: string;
 }
 
-export default function ContinueWatching({ className }: ContinueWatchingProps) {
+// 🚀 优化方案6：使用React.memo防止不必要的重渲染
+function ContinueWatching({ className }: ContinueWatchingProps) {
   const [playRecords, setPlayRecords] = useState<
     (PlayRecord & { key: string })[]
   >([]);
@@ -35,6 +37,10 @@ export default function ContinueWatching({ className }: ContinueWatchingProps) {
   const [watchingUpdates, setWatchingUpdates] = useState<WatchingUpdate | null>(null);
   const [requireClearConfirmation, setRequireClearConfirmation] = useState(false);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+
+  // 🚀 TanStack Query - 使用 useMutation 管理清空播放记录操作
+  // 特性：乐观更新（立即清空 UI）+ 错误回滚（失败时恢复数据）
+  const clearPlayRecordsMutation = useClearPlayRecordsMutation();
 
   // 读取清空确认设置
   useEffect(() => {
@@ -201,9 +207,11 @@ export default function ContinueWatching({ className }: ContinueWatchingProps) {
   };
 
   // 处理清空所有记录
-  const handleClearAll = async () => {
-    await clearAllPlayRecords();
-    setPlayRecords([]);
+  const handleClearAll = () => {
+    // 🚀 使用 mutation.mutate() 清空播放记录
+    // 特性：立即清空 UI（乐观更新），失败时自动回滚
+    clearPlayRecordsMutation.mutate();
+    setShowConfirmDialog(false);
   };
 
   return (
@@ -259,6 +267,8 @@ export default function ContinueWatching({ className }: ContinueWatchingProps) {
               const { source, id } = parseKey(record.key);
               const newEpisodesCount = getNewEpisodesCount(record);
               const latestTotalEpisodes = getLatestTotalEpisodes(record);
+              // 优先使用播放记录中保存的 type，否则根据集数判断
+              const cardType = record.type || (latestTotalEpisodes > 1 ? 'tv' : '');
               return (
                 <div
                   key={record.key}
@@ -282,9 +292,10 @@ export default function ContinueWatching({ className }: ContinueWatchingProps) {
                           prev.filter((r) => r.key !== record.key)
                         )
                       }
-                      type={latestTotalEpisodes > 1 ? 'tv' : ''}
+                      type={cardType}
                       remarks={record.remarks}
                       priority={index < 4}
+                      douban_id={record.douban_id}
                     />
                   </div>
                   {/* 新集数徽章 - Netflix 统一风格 */}
@@ -300,3 +311,5 @@ export default function ContinueWatching({ className }: ContinueWatchingProps) {
     </section>
   );
 }
+
+export default memo(ContinueWatching);

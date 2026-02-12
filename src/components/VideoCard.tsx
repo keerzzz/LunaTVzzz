@@ -13,7 +13,12 @@ import React, {
   useOptimistic,
   useState,
 } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 
+import { useLongPress } from '@/hooks/useLongPress';
+import { useToggleFavoriteMutation } from '@/hooks/useFavoritesMutations';
+import { useDeletePlayRecordMutation } from '@/hooks/usePlayRecordsMutations';
+import { isAIRecommendFeatureDisabled } from '@/lib/ai-recommend.client';
 import {
   deleteFavorite,
   deletePlayRecord,
@@ -23,7 +28,6 @@ import {
   subscribeToDataUpdates,
 } from '@/lib/db.client';
 import { processImageUrl, isSeriesCompleted } from '@/lib/utils';
-import { useLongPress } from '@/hooks/useLongPress';
 
 import { ImagePlaceholder } from '@/components/ImagePlaceholder';
 import MobileActionSheet from '@/components/MobileActionSheet';
@@ -92,6 +96,10 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(function VideoCard
   ref
 ) {
   const router = useRouter();
+  const queryClient = useQueryClient();
+  const toggleFavoriteMutation = useToggleFavoriteMutation();
+  const deletePlayRecordMutation = useDeletePlayRecordMutation();
+
   const [favorited, setFavorited] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [imageLoaded, setImageLoaded] = useState(false); // 图片加载状态
@@ -216,6 +224,12 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(function VideoCard
       return;
     }
 
+    if (isAIRecommendFeatureDisabled()) {
+      setAiEnabledLocal(false);
+      setAiCheckCompleteLocal(true);
+      return;
+    }
+
     let cancelled = false;
 
     (async () => {
@@ -244,7 +258,7 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(function VideoCard
     };
   }, [aiEnabledProp, aiCheckCompleteProp]); // 依赖父组件传递的props
 
-  // 🚀 使用 useOptimistic 优化收藏功能 - React 19 新特性
+  // 🚀 使用 TanStack Query useMutation 优化收藏功能
   const handleToggleFavorite = useCallback(
     async (e: React.MouseEvent) => {
       e.preventDefault();
@@ -253,54 +267,56 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(function VideoCard
       // 所有豆瓣内容都允许收藏
       if (!actualSource || !actualId) return;
 
-      try {
-        // 确定当前收藏状态
-        const currentFavorited = from === 'search' ? searchFavorited : favorited;
-        const newFavoritedState = !currentFavorited;
+      // 确定当前收藏状态
+      const currentFavorited = from === 'search' ? searchFavorited : favorited;
+      const newFavoritedState = !currentFavorited;
 
-        // 🎯 立即更新 UI（乐观更新）- 用户感知零延迟
-        if (from === 'search') {
-          setOptimisticSearchFavorited(newFavoritedState);
-        } else {
-          setOptimisticFavorited(newFavoritedState);
-        }
+      // 🎯 立即更新 UI（乐观更新）- 用户感知零延迟
+      if (from === 'search') {
+        setOptimisticSearchFavorited(newFavoritedState);
+      } else {
+        setOptimisticFavorited(newFavoritedState);
+      }
 
-        // 🔄 后台异步执行数据库操作
-        if (currentFavorited) {
-          // 如果已收藏，删除收藏
-          await deleteFavorite(actualSource, actualId);
-          // 操作成功后更新真实状态
-          if (from === 'search') {
-            setSearchFavorited(false);
-          } else {
-            setFavorited(false);
-          }
-        } else {
-          // 如果未收藏，添加收藏
-          await saveFavorite(actualSource, actualId, {
+      // 🔄 使用 mutation 执行数据库操作
+      toggleFavoriteMutation.mutate(
+        {
+          source: actualSource,
+          id: actualId,
+          isFavorited: currentFavorited || false,
+          favorite: {
             title: actualTitle,
             source_name: source_name || '即将上映',
             year: actualYear || '',
             cover: actualPoster,
             total_episodes: actualEpisodes ?? 1,
             save_time: Date.now(),
-            search_title: actualQuery || actualTitle, // 保存搜索标题用于后续查找资源
-            type: type || undefined, // 保存内容类型（movie/tv/variety等），空字符串转为undefined
-            releaseDate: releaseDate, // 保存上映日期
-            remarks: remarks, // 保存备注信息
-          });
-          // 操作成功后更新真实状态
-          if (from === 'search') {
-            setSearchFavorited(true);
-          } else {
-            setFavorited(true);
-          }
+            search_title: actualQuery || actualTitle,
+            type: type || undefined,
+            releaseDate: releaseDate,
+            remarks: remarks,
+          },
+        },
+        {
+          onSuccess: () => {
+            // 操作成功后更新真实状态
+            if (from === 'search') {
+              setSearchFavorited(newFavoritedState);
+            } else {
+              setFavorited(newFavoritedState);
+            }
+          },
+          onError: (err) => {
+            // ⚠️ 如果操作失败，恢复原状态
+            console.error('切换收藏状态失败:', err);
+            if (from === 'search') {
+              setOptimisticSearchFavorited(currentFavorited);
+            } else {
+              setOptimisticFavorited(currentFavorited || false);
+            }
+          },
         }
-      } catch (err) {
-        // ⚠️ 如果操作失败，恢复原状态（useOptimistic会自动回滚）
-        console.error('切换收藏状态失败:', err);
-        throw new Error('切换收藏状态失败');
-      }
+      );
     },
     [
       from,
@@ -317,6 +333,10 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(function VideoCard
       searchFavorited,
       setOptimisticFavorited,
       setOptimisticSearchFavorited,
+      toggleFavoriteMutation,
+      type,
+      releaseDate,
+      remarks,
     ]
   );
 
@@ -325,15 +345,37 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(function VideoCard
       e.preventDefault();
       e.stopPropagation();
       if (from !== 'playrecord' || !actualSource || !actualId) return;
-      try {
-        await deletePlayRecord(actualSource, actualId);
-        onDelete?.();
-      } catch (err) {
-        throw new Error('删除播放记录失败');
-      }
+
+      deletePlayRecordMutation.mutate(
+        { source: actualSource, id: actualId },
+        {
+          onSuccess: () => {
+            onDelete?.();
+          },
+          onError: (err) => {
+            console.error('删除播放记录失败:', err);
+          },
+        }
+      );
     },
-    [from, actualSource, actualId, onDelete]
+    [from, actualSource, actualId, onDelete, deletePlayRecordMutation]
   );
+
+  // 🚀 数据预取 - 在 hover 时预取收藏数据
+  const handlePrefetch = useCallback(() => {
+    if (!actualSource || !actualId) return;
+
+    // 预取收藏数据
+    queryClient.prefetchQuery({
+      queryKey: ['favorites'],
+      queryFn: async () => {
+        // 这里可以预取收藏列表或检查收藏状态
+        // 由于我们使用 IndexedDB，这个操作很快，主要是为了保持缓存新鲜
+        return queryClient.getQueryData(['favorites']) || {};
+      },
+      staleTime: 10 * 1000, // 10秒内不重复预取
+    });
+  }, [actualSource, actualId, queryClient]);
 
   const handleClick = useCallback(() => {
     // 如果是即将上映的内容，不执行跳转，显示提示
@@ -714,8 +756,10 @@ const VideoCard = forwardRef<VideoCardHandle, VideoCardProps>(function VideoCard
   return (
     <>
       <div
-        className='@container group relative w-full rounded-lg bg-transparent cursor-pointer transition-all duration-300 ease-in-out hover:scale-[1.05] hover:z-30 hover:drop-shadow-2xl'
+        className='@container group relative w-full rounded-lg bg-transparent cursor-pointer transition-all duration-300 ease-in-out hover:scale-[1.05] hover:z-30 hover:shadow-2xl'
         onClick={handleClick}
+        onMouseEnter={handlePrefetch}
+        onFocus={handlePrefetch}
         {...longPressProps}
         style={{
           // 禁用所有默认的长按和选择效果
