@@ -38,6 +38,7 @@ import {
   Settings,
   Shield,
   TestTube,
+  Ticket,
   Tv,
   Upload,
   Users,
@@ -62,11 +63,13 @@ import TrustedNetworkConfig from '@/components/TrustedNetworkConfig';
 import DanmuApiConfig from '@/components/DanmuApiConfig';
 import { TVBoxTokenCell, TVBoxTokenModal } from '@/components/TVBoxTokenManager';
 import YouTubeConfig from '@/components/YouTubeConfig';
-import ShortDramaConfig from '@/components/ShortDramaConfig';
+// import ShortDramaConfig from '@/components/ShortDramaConfig'; // 暂时隐藏短剧API配置
 import DownloadConfig from '@/components/OfflineDownloadConfig';
+import EmbyConfig from '@/components/EmbyConfig';
 import CustomAdFilterConfig from '@/components/CustomAdFilterConfig';
 import WatchRoomConfig from '@/components/WatchRoomConfig';
 import PerformanceMonitor from '@/components/admin/PerformanceMonitor';
+import InviteCodeManager from '@/components/InviteCodeManager';
 import PageLayout from '@/components/PageLayout';
 
 // 统一按钮样式系统
@@ -290,6 +293,7 @@ interface SiteConfig {
   DisableYellowFilter: boolean;
   ShowAdultContent: boolean;
   FluidSearch: boolean;
+  EnableWebLive: boolean;
   EnablePuppeteer: boolean; // 豆瓣 Puppeteer 开关
   DoubanCookies?: string; // 豆瓣认证 Cookies
   // TMDB配置
@@ -932,6 +936,73 @@ const UserConfig = ({ config, role, refreshConfig }: UserConfigProps) => {
                 </span>
               </div>
             </div>
+
+            {/* 需要邀请码注册设置 */}
+            {config.UserConfig.AllowRegister && (
+              <div className='p-4 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700'>
+                <div className='flex items-center justify-between'>
+                  <div>
+                    <div className='font-medium text-gray-900 dark:text-gray-100'>
+                      需要邀请码注册
+                    </div>
+                    <div className='text-sm text-gray-600 dark:text-gray-400'>
+                      开启后，用户注册时必须提供有效的邀请码
+                    </div>
+                  </div>
+                  <div className='flex items-center'>
+                    <button
+                      type="button"
+                      className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-600 focus:ring-offset-2 ${
+                        config.UserConfig.RequireInviteCode ? buttonStyles.toggleOn : buttonStyles.toggleOff
+                      }`}
+                      role="switch"
+                      aria-checked={config.UserConfig.RequireInviteCode}
+                      onClick={async () => {
+                        await withLoading('toggleRequireInviteCode', async () => {
+                          try {
+                            const response = await fetch('/api/admin/config', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({
+                                ...config,
+                                UserConfig: {
+                                  ...config.UserConfig,
+                                  RequireInviteCode: !config.UserConfig.RequireInviteCode
+                                }
+                              })
+                            });
+
+                            if (response.ok) {
+                              await refreshConfig();
+                              showAlert({
+                                type: 'success',
+                                title: '设置已更新',
+                                message: config.UserConfig.RequireInviteCode ? '已关闭邀请码注册' : '已开启邀请码注册',
+                                timer: 2000
+                              });
+                            } else {
+                              throw new Error('更新配置失败');
+                            }
+                          } catch (err) {
+                            showError(err instanceof Error ? err.message : '操作失败', showAlert);
+                          }
+                        });
+                      }}
+                    >
+                      <span
+                        aria-hidden="true"
+                        className={`pointer-events-none inline-block h-5 w-5 rounded-full ${buttonStyles.toggleThumb} shadow transform ring-0 transition duration-200 ease-in-out ${
+                          config.UserConfig.RequireInviteCode ? buttonStyles.toggleThumbOn : buttonStyles.toggleThumbOff
+                        }`}
+                      />
+                    </button>
+                    <span className='ml-3 text-sm font-medium text-gray-900 dark:text-gray-100'>
+                      {config.UserConfig.RequireInviteCode ? '开启' : '关闭'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* 自动清理非活跃用户设置 */}
             <div className='p-4 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700'>
@@ -5111,6 +5182,7 @@ const SiteConfigComponent = ({ config, refreshConfig }: { config: AdminConfig | 
     DisableYellowFilter: false,
     ShowAdultContent: false,
     FluidSearch: true,
+    EnableWebLive: false,
     // TMDB配置默认值
     TMDBApiKey: '',
     TMDBLanguage: 'zh-CN',
@@ -5190,6 +5262,7 @@ const SiteConfigComponent = ({ config, refreshConfig }: { config: AdminConfig | 
         DisableYellowFilter: config.SiteConfig.DisableYellowFilter || false,
         ShowAdultContent: config.SiteConfig.ShowAdultContent || false,
         FluidSearch: config.SiteConfig.FluidSearch || true,
+        EnableWebLive: config.SiteConfig.EnableWebLive ?? false,
         // TMDB配置
         TMDBApiKey: config.SiteConfig.TMDBApiKey || '',
         TMDBLanguage: config.SiteConfig.TMDBLanguage || 'zh-CN',
@@ -5872,6 +5945,38 @@ const SiteConfigComponent = ({ config, refreshConfig }: { config: AdminConfig | 
         </div>
         <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
           启用后搜索结果将实时流式返回，提升用户体验。
+        </p>
+      </div>
+
+      {/* 启用网页直播 */}
+      <div>
+        <div className='flex items-center justify-between'>
+          <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+            启用网页直播
+          </label>
+          <button
+            type='button'
+            onClick={() =>
+              setSiteSettings((prev) => ({
+                ...prev,
+                EnableWebLive: !prev.EnableWebLive,
+              }))
+            }
+            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 ${siteSettings.EnableWebLive
+              ? buttonStyles.toggleOn
+              : buttonStyles.toggleOff
+              }`}
+          >
+            <span
+              className={`inline-block h-4 w-4 transform rounded-full ${buttonStyles.toggleThumb} transition-transform ${siteSettings.EnableWebLive
+                ? buttonStyles.toggleThumbOn
+                : buttonStyles.toggleThumbOff
+                }`}
+            />
+          </button>
+        </div>
+        <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+          网页直播性能较差，会导致服务器内存泄露，建议谨慎开启。
         </p>
       </div>
 
@@ -6959,6 +7064,7 @@ function AdminPageClient() {
     aiRecommendConfig: false,
     youtubeConfig: false,
     shortDramaConfig: false,
+    embyConfig: false,
     downloadConfig: false,
     customAdFilter: false,
     watchRoomConfig: false,
@@ -6967,6 +7073,7 @@ function AdminPageClient() {
     danmuApiConfig: false,
     telegramAuthConfig: false,
     oidcAuthConfig: false,
+    inviteCodeManager: false,
     configFile: false,
     cacheManager: false,
     dataMigration: false,
@@ -7135,6 +7242,20 @@ function AdminPageClient() {
               />
             </CollapsibleTab>
 
+            {/* 邀请码管理标签 - 仅站长可见 */}
+            {role === 'owner' && (
+              <CollapsibleTab
+                title='邀请码管理'
+                icon={
+                  <Ticket size={20} className='text-blue-500 dark:text-blue-400' />
+                }
+                isExpanded={expandedTabs.inviteCodeManager}
+                onToggle={() => toggleTab('inviteCodeManager')}
+              >
+                <InviteCodeManager />
+              </CollapsibleTab>
+            )}
+
             {/* 视频源配置标签 */}
             <CollapsibleTab
               title='视频源配置'
@@ -7231,7 +7352,7 @@ function AdminPageClient() {
               <YouTubeConfig config={config} refreshConfig={fetchConfig} />
             </CollapsibleTab>
 
-            {/* 短剧API配置标签 */}
+            {/* 短剧API配置标签 - 暂时隐藏，代码保留以后有用再显示
             <CollapsibleTab
               title='短剧API配置'
               icon={
@@ -7244,6 +7365,22 @@ function AdminPageClient() {
               onToggle={() => toggleTab('shortDramaConfig')}
             >
               <ShortDramaConfig config={config} refreshConfig={fetchConfig} />
+            </CollapsibleTab>
+            */}
+
+            {/* Emby配置标签 */}
+            <CollapsibleTab
+              title='Emby私人影库'
+              icon={
+                <FolderOpen
+                  size={20}
+                  className='text-indigo-600 dark:text-indigo-400'
+                />
+              }
+              isExpanded={expandedTabs.embyConfig}
+              onToggle={() => toggleTab('embyConfig')}
+            >
+              <EmbyConfig config={config} refreshConfig={fetchConfig} />
             </CollapsibleTab>
 
             {/* 下载配置标签 */}
