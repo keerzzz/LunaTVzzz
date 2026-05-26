@@ -63,14 +63,16 @@ export default function artplayerPluginSeekButtons(option = {}) {
         button.className = `art-seek-floating-${side}`;
 
         if (isSingleButton) {
-          // 单侧模式：显示双向箭头
+          // 单侧模式：显示双向箭头（竖向排列）
           const dualIcon = `
-            <svg viewBox="0 0 48 32" fill="none" xmlns="http://www.w3.org/2000/svg" style="width: 100%; height: 100%;">
-              <g transform="translate(0, 0) scale(0.65)">
+            <svg viewBox="0 0 32 56" fill="none" xmlns="http://www.w3.org/2000/svg" style="width: 100%; height: 100%;">
+              <!-- 上方后退箭头 -->
+              <g transform="translate(0, 2) scale(0.65)">
                 <path d="M16 4C9.373 4 4 9.373 4 16s5.373 12 12 12 12-5.373 12-12h-2.5c0 5.247-4.253 9.5-9.5 9.5S6.5 21.247 6.5 16 10.753 6.5 16 6.5c2.858 0 5.42 1.265 7.176 3.265L20 13h8V5l-2.94 2.94C22.697 5.39 19.547 4 16 4z" fill="currentColor"/>
                 <text x="16" y="19" text-anchor="middle" font-size="9" font-weight="bold" fill="currentColor" font-family="Arial, sans-serif">${currentSeekTime}</text>
               </g>
-              <g transform="translate(24, 0) scale(0.65)">
+              <!-- 下方前进箭头 -->
+              <g transform="translate(0, 30) scale(0.65)">
                 <path d="M16 4c6.627 0 12 5.373 12 12s-5.373 12-12 12S4 22.627 4 16h2.5c0 5.247 4.253 9.5 9.5 9.5s9.5-4.253 9.5-9.5S21.247 6.5 16 6.5c-2.858 0-5.42 1.265-7.176 3.265L12 13H4V5l2.94 2.94C9.303 5.39 12.453 4 16 4z" fill="currentColor"/>
                 <text x="16" y="19" text-anchor="middle" font-size="9" font-weight="bold" fill="currentColor" font-family="Arial, sans-serif">${currentSeekTime}</text>
               </g>
@@ -78,12 +80,12 @@ export default function artplayerPluginSeekButtons(option = {}) {
           `;
           button.innerHTML = dualIcon;
 
-          // 点击事件：左半边快退，右半边快进
+          // 点击事件：上半边快退，下半边快进
           button.onclick = (e) => {
             const rect = button.getBoundingClientRect();
-            const clickX = e.clientX - rect.left;
-            const isLeftHalf = clickX < rect.width / 2;
-            if (isLeftHalf) {
+            const clickY = e.clientY - rect.top;
+            const isTopHalf = clickY < rect.height / 2;
+            if (isTopHalf) {
               seekBackward();
             } else {
               seekForward();
@@ -117,9 +119,9 @@ export default function artplayerPluginSeekButtons(option = {}) {
           buttons.push(button);
         }
 
-        // 跟随控制栏的显示/隐藏状态
+        // 跟随控制栏的显示/隐藏状态（锁定时也隐藏）
         const updateButtonsVisibility = () => {
-          const controlsVisible = art.controls.show;
+          const controlsVisible = art.controls.show && !art.isLock;
           const allButtons = art.template.$player.querySelectorAll('.art-seek-floating-left, .art-seek-floating-right');
           allButtons.forEach(button => {
             if (controlsVisible) {
@@ -132,8 +134,9 @@ export default function artplayerPluginSeekButtons(option = {}) {
           });
         };
 
-        // 监听控制栏显示/隐藏事件
+        // 监听控制栏显示/隐藏事件，以及锁定/解锁事件
         art.on('control', updateButtonsVisibility);
+        art.on('lock', updateButtonsVisibility);
 
         // 初始状态
         updateButtonsVisibility();
@@ -164,66 +167,103 @@ export default function artplayerPluginSeekButtons(option = {}) {
           pointer-events: none;
         }
 
-        /* 双侧模式：圆形按钮（单向箭头） - 默认 */
-        .art-seek-floating-left,
-        .art-seek-floating-right {
-          width: 68px;
-          height: 68px;
+        /* 双侧模式：圆形按钮（单向箭头） */
+        body:not([data-seek-layout="left"]):not([data-seek-layout="right"]) .art-seek-floating-left,
+        body:not([data-seek-layout="left"]):not([data-seek-layout="right"]) .art-seek-floating-right {
+          width: 64px;
+          height: 64px;
           border-radius: 50%;
         }
 
-        /* 单侧模式：椭圆形按钮（双向箭头） */
+        /* 单侧模式：竖向椭圆按钮（双向箭头上下排列） */
         body[data-seek-layout="left"] .art-seek-floating-left,
         body[data-seek-layout="right"] .art-seek-floating-right {
-          width: 110px;
-          height: 68px;
-          border-radius: 34px;
+          width: 64px;
+          height: 110px;
+          border-radius: 32px;
         }
 
-        .art-seek-floating-left {
-          left: 80px;  /* 避免与左侧锁定按钮重叠 */
+        /* 双侧模式：按钮在屏幕中间（Netflix风格） */
+        body:not([data-seek-layout="left"]):not([data-seek-layout="right"]) .art-seek-floating-left {
+          left: 50%;
+          transform: translate(-100%, -50%);
+          margin-left: -40px;
         }
 
-        .art-seek-floating-right {
+        body:not([data-seek-layout="left"]):not([data-seek-layout="right"]) .art-seek-floating-right {
+          right: 50%;
+          transform: translate(100%, -50%);
+          margin-right: -40px;
+        }
+
+        body:not([data-seek-layout="left"]):not([data-seek-layout="right"]) .art-seek-floating-left:active {
+          transform: translate(-100%, -50%) scale(0.92);
+        }
+
+        body:not([data-seek-layout="left"]):not([data-seek-layout="right"]) .art-seek-floating-right:active {
+          transform: translate(100%, -50%) scale(0.92);
+        }
+
+        /* 单侧模式：按钮在屏幕边缘 */
+        body[data-seek-layout="left"] .art-seek-floating-left {
+          left: 16px;
+          top: 35%;  /* 向上移动避开锁定按钮 */
+        }
+
+        body[data-seek-layout="right"] .art-seek-floating-right {
           right: 16px;
         }
 
-        .art-seek-floating-left:active,
-        .art-seek-floating-right:active {
+        /* 单侧模式的active状态 */
+        body[data-seek-layout="left"] .art-seek-floating-left:active,
+        body[data-seek-layout="right"] .art-seek-floating-right:active {
           transform: translateY(-50%) scale(0.92);
           background: rgba(255, 255, 255, 0.25);
           box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
         }
 
         /* 全屏时调整位置和大小 */
-        .art-fullscreen .art-seek-floating-left,
-        .art-fullscreen-web .art-seek-floating-left {
-          left: 100px;  /* 全屏时也避免与锁定按钮重叠 */
+        /* 双侧模式全屏：保持中间位置，增大间距 */
+        .art-fullscreen body:not([data-seek-layout="left"]):not([data-seek-layout="right"]) .art-seek-floating-left,
+        .art-fullscreen-web body:not([data-seek-layout="left"]):not([data-seek-layout="right"]) .art-seek-floating-left {
+          margin-left: -60px;
         }
 
-        .art-fullscreen .art-seek-floating-right,
-        .art-fullscreen-web .art-seek-floating-right {
+        .art-fullscreen body:not([data-seek-layout="left"]):not([data-seek-layout="right"]) .art-seek-floating-right,
+        .art-fullscreen-web body:not([data-seek-layout="left"]):not([data-seek-layout="right"]) .art-seek-floating-right {
+          margin-right: -60px;
+        }
+
+        /* 单侧模式全屏：调整边缘位置 */
+        .art-fullscreen body[data-seek-layout="left"] .art-seek-floating-left,
+        .art-fullscreen-web body[data-seek-layout="left"] .art-seek-floating-left {
+          left: 24px;
+          top: 35%;
+        }
+
+        .art-fullscreen body[data-seek-layout="right"] .art-seek-floating-right,
+        .art-fullscreen-web body[data-seek-layout="right"] .art-seek-floating-right {
           right: 24px;
         }
 
-        /* 全屏时：双侧模式（圆形按钮更大） */
-        .art-fullscreen .art-seek-floating-left,
-        .art-fullscreen .art-seek-floating-right,
-        .art-fullscreen-web .art-seek-floating-left,
-        .art-fullscreen-web .art-seek-floating-right {
-          width: 80px;
-          height: 80px;
-          padding: 18px;
+        /* 全屏时：双侧模式 */
+        .art-fullscreen body:not([data-seek-layout="left"]):not([data-seek-layout="right"]) .art-seek-floating-left,
+        .art-fullscreen body:not([data-seek-layout="left"]):not([data-seek-layout="right"]) .art-seek-floating-right,
+        .art-fullscreen-web body:not([data-seek-layout="left"]):not([data-seek-layout="right"]) .art-seek-floating-left,
+        .art-fullscreen-web body:not([data-seek-layout="left"]):not([data-seek-layout="right"]) .art-seek-floating-right {
+          width: 72px;
+          height: 72px;
+          padding: 16px;
         }
 
-        /* 全屏时：单侧模式（椭圆按钮更大） */
-        body[data-seek-layout="left"] .art-fullscreen .art-seek-floating-left,
-        body[data-seek-layout="right"] .art-fullscreen .art-seek-floating-right,
-        body[data-seek-layout="left"] .art-fullscreen-web .art-seek-floating-left,
-        body[data-seek-layout="right"] .art-fullscreen-web .art-seek-floating-right {
-          width: 128px;
-          height: 80px;
-          padding: 18px;
+        /* 全屏时：单侧模式 */
+        .art-fullscreen body[data-seek-layout="left"] .art-seek-floating-left,
+        .art-fullscreen body[data-seek-layout="right"] .art-seek-floating-right,
+        .art-fullscreen-web body[data-seek-layout="left"] .art-seek-floating-left,
+        .art-fullscreen-web body[data-seek-layout="right"] .art-seek-floating-right {
+          width: 72px;
+          height: 128px;
+          padding: 16px;
         }
       `;
       document.head.appendChild(style);
@@ -325,14 +365,14 @@ export default function artplayerPluginSeekButtons(option = {}) {
               button.className = `art-seek-floating-${side}`;
 
               if (isSingleButton) {
-                // 单侧模式：显示双向箭头
+                // 单侧模式：显示双向箭头（竖向排列）
                 const dualIcon = `
-                  <svg viewBox="0 0 48 32" fill="none" xmlns="http://www.w3.org/2000/svg" style="width: 100%; height: 100%;">
-                    <g transform="translate(0, 0) scale(0.65)">
+                  <svg viewBox="0 0 32 56" fill="none" xmlns="http://www.w3.org/2000/svg" style="width: 100%; height: 100%;">
+                    <g transform="translate(0, 2) scale(0.65)">
                       <path d="M16 4C9.373 4 4 9.373 4 16s5.373 12 12 12 12-5.373 12-12h-2.5c0 5.247-4.253 9.5-9.5 9.5S6.5 21.247 6.5 16 10.753 6.5 16 6.5c2.858 0 5.42 1.265 7.176 3.265L20 13h8V5l-2.94 2.94C22.697 5.39 19.547 4 16 4z" fill="currentColor"/>
                       <text x="16" y="19" text-anchor="middle" font-size="9" font-weight="bold" fill="currentColor" font-family="Arial, sans-serif">${currentSeekTime}</text>
                     </g>
-                    <g transform="translate(24, 0) scale(0.65)">
+                    <g transform="translate(0, 30) scale(0.65)">
                       <path d="M16 4c6.627 0 12 5.373 12 12s-5.373 12-12 12S4 22.627 4 16h2.5c0 5.247 4.253 9.5 9.5 9.5s9.5-4.253 9.5-9.5S21.247 6.5 16 6.5c-2.858 0-5.42 1.265-7.176 3.265L12 13H4V5l2.94 2.94C9.303 5.39 12.453 4 16 4z" fill="currentColor"/>
                       <text x="16" y="19" text-anchor="middle" font-size="9" font-weight="bold" fill="currentColor" font-family="Arial, sans-serif">${currentSeekTime}</text>
                     </g>
@@ -341,9 +381,9 @@ export default function artplayerPluginSeekButtons(option = {}) {
                 button.innerHTML = dualIcon;
                 button.onclick = (e) => {
                   const rect = button.getBoundingClientRect();
-                  const clickX = e.clientX - rect.left;
-                  const isLeftHalf = clickX < rect.width / 2;
-                  if (isLeftHalf) {
+                  const clickY = e.clientY - rect.top;
+                  const isTopHalf = clickY < rect.height / 2;
+                  if (isTopHalf) {
                     seekBackward();
                   } else {
                     seekForward();
@@ -394,15 +434,15 @@ export default function artplayerPluginSeekButtons(option = {}) {
                 }
               });
             } else {
-              // 单侧模式：更新双向箭头
+              // 单侧模式：更新双向箭头（竖向排列）
               buttons.forEach(button => {
                 const dualIcon = `
-                  <svg viewBox="0 0 48 32" fill="none" xmlns="http://www.w3.org/2000/svg" style="width: 100%; height: 100%;">
-                    <g transform="translate(0, 0) scale(0.65)">
+                  <svg viewBox="0 0 32 56" fill="none" xmlns="http://www.w3.org/2000/svg" style="width: 100%; height: 100%;">
+                    <g transform="translate(0, 2) scale(0.65)">
                       <path d="M16 4C9.373 4 4 9.373 4 16s5.373 12 12 12 12-5.373 12-12h-2.5c0 5.247-4.253 9.5-9.5 9.5S6.5 21.247 6.5 16 10.753 6.5 16 6.5c2.858 0 5.42 1.265 7.176 3.265L20 13h8V5l-2.94 2.94C22.697 5.39 19.547 4 16 4z" fill="currentColor"/>
                       <text x="16" y="19" text-anchor="middle" font-size="9" font-weight="bold" fill="currentColor" font-family="Arial, sans-serif">${currentSeekTime}</text>
                     </g>
-                    <g transform="translate(24, 0) scale(0.65)">
+                    <g transform="translate(0, 30) scale(0.65)">
                       <path d="M16 4c6.627 0 12 5.373 12 12s-5.373 12-12 12S4 22.627 4 16h2.5c0 5.247 4.253 9.5 9.5 9.5s9.5-4.253 9.5-9.5S21.247 6.5 16 6.5c-2.858 0-5.42 1.265-7.176 3.265L12 13H4V5l2.94 2.94C9.303 5.39 12.453 4 16 4z" fill="currentColor"/>
                       <text x="16" y="19" text-anchor="middle" font-size="9" font-weight="bold" fill="currentColor" font-family="Arial, sans-serif">${currentSeekTime}</text>
                     </g>
