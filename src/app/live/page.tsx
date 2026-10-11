@@ -9,6 +9,7 @@ import { Heart, Menu, Radio, RefreshCw, Search, Tv, X, ChevronDown, ChevronUp } 
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Tabs, Tab, Box } from '@mui/material';
 
+import OptimizedHlsLoader from '@/lib/hls-loader';
 import {
   debounce,
 } from '@/lib/channel-search';
@@ -1644,44 +1645,6 @@ function LivePageClient() {
     }
   }, [selectedGroup, groupedChannels]);
 
-  class CustomHlsJsLoader extends Hls.DefaultConfig.loader {
-    constructor(config: any) {
-      super(config);
-      const load = this.load.bind(this);
-      this.load = function (context: any, config: any, callbacks: any) {
-        // 所有的请求都带一个 source 参数
-        try {
-          const url = new URL(context.url);
-          url.searchParams.set('moontv-source', currentSourceRef.current?.key || '');
-          context.url = url.toString();
-        } catch (error) {
-          // ignore
-        }
-        // 拦截manifest和level请求
-        if (
-          (context as any).type === 'manifest' ||
-          (context as any).type === 'level'
-        ) {
-          // 判断是否浏览器直连
-          const isLiveDirectConnectStr = localStorage.getItem('liveDirectConnect');
-          const isLiveDirectConnect = isLiveDirectConnectStr === 'true';
-          if (isLiveDirectConnect) {
-            // 浏览器直连，使用 URL 对象处理参数
-            try {
-              const url = new URL(context.url);
-              url.searchParams.set('allowCORS', 'true');
-              context.url = url.toString();
-            } catch (error) {
-              // 如果 URL 解析失败，回退到字符串拼接
-              context.url = context.url + '&allowCORS=true';
-            }
-          }
-        }
-        // 执行原始load方法
-        load(context, config, callbacks);
-      };
-    }
-  }
 
   // 错误重试状态管理
   let keyLoadErrorCount = 0;
@@ -1753,7 +1716,12 @@ function LivePageClient() {
       
       // 浏览器特殊优化
       liveDurationInfinity: false, // 源码默认，Safari兼容
-      
+
+      // v1.7.0 新增：直播源连续 N 次刷新播放列表无变化时判定为假死，抛出 PLAYLIST_UNCHANGED_ERROR，避免无限轮询死频道
+      liveMaxUnchangedPlaylistRefresh: 5,
+      // v1.7.0 新增：appendBuffer 卡死超时兜底，避免播放静默卡住不报错
+      appendTimeout: 10000,
+
       // 移动设备网络优化 - 使用新的LoadPolicy配置
       ...(isMobile && {
         // 使用 fragLoadPolicy 替代旧的配置方式
@@ -1776,8 +1744,18 @@ function LivePageClient() {
           }
         }
       }),
-      
-      loader: CustomHlsJsLoader,
+
+      /* 优化的 HLS Loader：直连模式 + 源标识 + 并发分片预取 */
+      loader: class extends OptimizedHlsLoader {
+        constructor(config: any) {
+          super({
+            ...config,
+            filterAds: false,
+            enableDirectConnect: localStorage.getItem('liveDirectConnect') === 'true',
+            sourceKey: currentSourceRef.current?.key || '',
+          });
+        }
+      },
     };
 
     const hls = new Hls(hlsConfig);
@@ -1857,6 +1835,15 @@ function LivePageClient() {
       if (data.details === Hls.ErrorDetails.BUFFER_INCOMPATIBLE_CODECS_ERROR) {
         console.error('Incompatible codecs error - fatal');
         setUnsupportedType('codec-incompatible');
+        setIsVideoLoading(false);
+        hls.destroy();
+        return;
+      }
+
+      // v1.7.0 新增：直播源连续多次刷新内容无变化（假死），hls.js 已耗尽内部重试预算，主动判定为不可用
+      if (data.details === Hls.ErrorDetails.PLAYLIST_UNCHANGED_ERROR) {
+        console.error('直播源假死（播放列表连续无变化），判定为不可用');
+        setUnsupportedType('channel-unavailable');
         setIsVideoLoading(false);
         hls.destroy();
         return;
